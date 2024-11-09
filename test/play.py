@@ -7,7 +7,7 @@ torch.set_grad_enabled(False)
 
 
 def causal_dw_conv1d_ref(input, kernel):
-    # input = input.float()
+    input = input.float()
     input_t = input.moveaxis(-1, -2)
     output = F.conv1d(F.pad(input_t, (3, 0)), kernel.T[:, None, :], groups=channels)
     output_t = output.moveaxis(-1, -2)
@@ -21,7 +21,7 @@ batch = 4
 length = 2048
 channels = 512
 
-input = torch.rand(batch, length, channels, device='cuda')
+input = torch.rand(batch, length, channels, device='cuda', dtype=torch.half)
 kernel = torch.rand(batch, channels, device='cuda')
 
 output = causal_dw_conv1d(input, kernel)
@@ -46,7 +46,7 @@ print((output - output_ref).abs().max())
 
 
 def benchmark(size, provider):
-    input = torch.rand((batch, size, channels), device='cuda')
+    input = torch.rand((batch, size, channels), device='cuda', dtype=torch.half)
     kernel = torch.rand((4, channels), device='cuda')
     
     quantiles = [0.5, 0.2, 0.8]
