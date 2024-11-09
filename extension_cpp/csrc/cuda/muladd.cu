@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include <torch/extension.h>
 
 #include <cuda.h>
@@ -12,6 +14,11 @@ namespace extension_cpp {
 
 int cdiv(int a, int b) {
     return (a + b - 1) / b;
+}
+
+
+__device__ float silu(float x) {
+    return x / (1.0f + expf(-x));
 }
 
 
@@ -56,7 +63,7 @@ __global__ void causal_dw_conv1d_kernel(
       sum += s_kernel[k][c] * s_input[l_index][c];
     }
     if (threadIdx.x <= BLOCK - KERNEL_SIZE && store_pos_id < length && ch_id < chs) {
-      output[b_id * length * chs + store_pos_id * chs + ch_id] = sum;
+      output[b_id * length * chs + store_pos_id * chs + ch_id] = silu(sum);
     }
   }
 

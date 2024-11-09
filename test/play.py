@@ -7,7 +7,10 @@ torch.set_grad_enabled(False)
 
 
 def causal_dw_conv1d_ref(input, kernel):
-    return F.conv1d(F.pad(input.moveaxis(-1, -2), (3, 0)), kernel.T[:, None, :], groups=channels).moveaxis(-1, -2).contiguous()
+    input_t = input.moveaxis(-1, -2)
+    output = F.conv1d(F.pad(input_t, (3, 0)), kernel.T[:, None, :], groups=channels)
+    output_t = output.moveaxis(-1, -2)
+    return F.silu(output_t).contiguous()
 
 
 causal_dw_conv1d_compiled = torch.compile(causal_dw_conv1d_ref)
