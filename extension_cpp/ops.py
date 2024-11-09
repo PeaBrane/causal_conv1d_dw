@@ -1,7 +1,11 @@
 import torch
 from torch import Tensor
 
-__all__ = ["mymuladd", "myadd_out"]
+__all__ = ["mymuladd", "myadd_out", "causal_dw_conv1d"]
+
+
+def causal_dw_conv1d(input, kernel):
+    return torch.ops.extension_cpp.causal_dw_conv1d.default(input, kernel)
 
 
 def mymuladd(a: Tensor, b: Tensor, c: float) -> Tensor:

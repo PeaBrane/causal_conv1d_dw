@@ -61,6 +61,10 @@ void myadd_out_cpu(const at::Tensor& a, const at::Tensor& b, at::Tensor& out) {
   }
 }
 
+at::Tensor causal_dw_conv1d(const at::Tensor& input, const at::Tensor& kernel) {
+  return input;
+}
+
 // Registers _C as a Python extension module.
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
 
@@ -69,6 +73,7 @@ TORCH_LIBRARY(extension_cpp, m) {
   m.def("mymuladd(Tensor a, Tensor b, float c) -> Tensor");
   m.def("mymul(Tensor a, Tensor b) -> Tensor");
   m.def("myadd_out(Tensor a, Tensor b, Tensor(a!) out) -> ()");
+  m.def("causal_dw_conv1d(Tensor input, Tensor kernel) -> Tensor");
 }
 
 // Registers CUDA implementations for mymuladd, mymul, myadd_out
@@ -76,6 +81,7 @@ TORCH_LIBRARY_IMPL(extension_cpp, CPU, m) {
   m.impl("mymuladd", &mymuladd_cpu);
   m.impl("mymul", &mymul_cpu);
   m.impl("myadd_out", &myadd_out_cpu);
+  m.impl("causal_dw_conv1d", &causal_dw_conv1d);
 }
 
 }

@@ -24,4 +24,4 @@ python test/benchmark.py
 
 ## Authors
 
-[Peter Goldsborough](https://github.com/goldsborough), [Richard Zou](https://github.com/zou3519)
+[Peter Goldsborough](https://github.com/goldsborough), [Richard Zou](https://github.com/zou3519), [Rudy Pei](https://github.com/PeaBrane)
