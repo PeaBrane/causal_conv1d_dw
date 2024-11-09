@@ -30,8 +30,8 @@ __global__ void causal_dw_conv1d_kernel(
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
 
   const int b_id = blockIdx.z;
-  const int bl_stride = BLOCK - KERNEL_SIZE + 1;
-  const int start_pos_id = blockIdx.y * bl_stride - KERNEL_SIZE + 1;
+  const int bl_stride = BLOCK - KERNEL_SIZE;
+  const int start_pos_id = blockIdx.y * bl_stride - KERNEL_SIZE;
   const int start_ch_id = blockIdx.x * blockDim.x;
   const int ch_id = start_ch_id + threadIdx.x;
 
@@ -52,9 +52,10 @@ __global__ void causal_dw_conv1d_kernel(
 
   __syncthreads();
 
-  for (int l = 0; l <= BLOCK - KERNEL_SIZE; ++l) {
+  for (int l = 1; l <= BLOCK - KERNEL_SIZE; ++l) {
     int store_pos_id = start_pos_id + l + KERNEL_SIZE - 1;
     float sum = 0.0f;
+    #pragma unroll
     for (int k = 0; k < KERNEL_SIZE; ++k) {
       int l_index = (l + k) % BLOCK;
       sum += s_kernel[k][threadIdx.x] * __half2float((s_input[l_index][threadIdx.x]));
@@ -81,7 +82,7 @@ at::Tensor causal_dw_conv1d_cuda(const at::Tensor& input, const at::Tensor& kern
   int length = input_contig.size(1);
   int chs = input_contig.size(2);
 
-  dim3 gridDim(cdiv(chs, BLOCK), cdiv(length, BLOCK - KERNEL_SIZE + 1), batch);
+  dim3 gridDim(cdiv(chs, BLOCK), cdiv(length, BLOCK - KERNEL_SIZE), batch);
   dim3 blockDim(BLOCK, 1, 1);
 
   causal_dw_conv1d_kernel<<<gridDim, blockDim>>>(input_ptr, kernel_ptr, output_ptr, length, chs);

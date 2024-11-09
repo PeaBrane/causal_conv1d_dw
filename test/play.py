@@ -2,6 +2,7 @@ import torch
 from torch.nn import functional as F
 from extension_cpp.ops import causal_dw_conv1d
 import triton
+import sys
 
 torch.set_grad_enabled(False)
 
@@ -28,7 +29,6 @@ output = causal_dw_conv1d(input, kernel)
 output_ref = causal_dw_conv1d_ref(input, kernel)
 
 print((output - output_ref).abs().max())
-
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
