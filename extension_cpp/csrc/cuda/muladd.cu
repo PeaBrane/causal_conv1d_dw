@@ -30,7 +30,7 @@ __global__ void causal_dw_conv1d_kernel(
   // load input block into SRAM
   for (int l = 0; l < BLOCK; ++l) {
     int pos_id = start_pos_id + l;
-    if (pos_id >= 0 && pos_id < length) {
+    if (pos_id >= 0 && pos_id < length && ch_id < chs) {
       s_input[l][threadIdx.x] = input[b_id * length * chs + pos_id * chs + ch_id];
     } else {
       s_input[l][threadIdx.x] = 0.0f;
@@ -55,7 +55,7 @@ __global__ void causal_dw_conv1d_kernel(
       int l_index = (threadIdx.x + k) % BLOCK;
       sum += s_kernel[k][c] * s_input[l_index][c];
     }
-    if (threadIdx.x <= BLOCK - KERNEL_SIZE && store_pos_id < length) {
+    if (threadIdx.x <= BLOCK - KERNEL_SIZE && store_pos_id < length && ch_id < chs) {
       output[b_id * length * chs + store_pos_id * chs + ch_id] = sum;
     }
   }
