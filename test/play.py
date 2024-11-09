@@ -38,9 +38,8 @@ print((output - output_ref).abs().max())
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot.
         line_vals=['torch', 'compiled', 'dummy', 'cuda'],  # Possible values for `line_arg`.
         line_names=['torch', 'compiled', 'dummy', 'cuda'],  # Label name for the lines.
-        # styles=[('blue', '-'), ('green', '-'), ()],  # Line styles.
         ylabel='GB/s',  # Label name for the y-axis.
-        plot_name='vector-add-performance',  # Name for the plot. Used also as a file name for saving the plot.
+        plot_name='performance',  # Name for the plot. Used also as a file name for saving the plot.
         args={},  # Values for function arguments not in `x_names` and `y_name`.
     ))
 

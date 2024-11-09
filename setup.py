@@ -65,12 +65,17 @@ def get_extensions():
     return ext_modules
 
 
+def read_requirements():
+    with open("requirements.txt") as f:
+        return f.read().splitlines()
+
+
 setup(
     name=library_name,
     version="0.0.1",
     packages=find_packages(),
     ext_modules=get_extensions(),
-    install_requires=["torch"],
+    install_requires=read_requirements(),
     description="Example of PyTorch cpp and CUDA extensions",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
