@@ -4,15 +4,12 @@ from extension_cpp.ops import causal_dw_conv1d
 import triton
 import sys
 
-torch.set_grad_enabled(False)
-
 
 def causal_dw_conv1d_ref(input, kernel):
-    input = input.float()
     input_t = input.moveaxis(-1, -2)
     output = F.conv1d(F.pad(input_t, (3, 0)), kernel.T[:, None, :], groups=channels)
     output_t = output.moveaxis(-1, -2)
-    return F.silu(output_t).contiguous().half()
+    return output_t.contiguous()
 
 
 causal_dw_conv1d_compiled = torch.compile(causal_dw_conv1d_ref)
@@ -22,13 +19,25 @@ batch = 4
 length = 2048
 channels = 512
 
-input = torch.rand(batch, length, channels, device='cuda', dtype=torch.half)
-kernel = torch.rand(batch, channels, device='cuda')
+input = torch.rand(batch, length, channels, device='cuda', requires_grad=True)
+kernel = torch.rand(batch, channels, device='cuda', requires_grad=True)
+gradient = torch.rand_like(input.detach()).float()
 
 output = causal_dw_conv1d(input, kernel)
-output_ref = causal_dw_conv1d_ref(input, kernel)
+output_1 = output.detach().clone()
+output.backward(gradient)
+input_grad = input.grad.clone()
+input.grad.zero_()
 
-print((output - output_ref).abs().max())
+output = causal_dw_conv1d_ref(input, kernel)
+output_ref = output.detach().clone()
+output.backward(gradient)
+input_grad_ref = input.grad.clone()
+
+assert torch.allclose(output_1, output_ref, rtol=1e-3, atol=1e-2)
+assert torch.allclose(input_grad, input_grad_ref, rtol=1e-3, atol=1e-2)
+
+sys.exit()
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
@@ -45,7 +54,7 @@ print((output - output_ref).abs().max())
 
 
 def benchmark(size, provider):
-    input = torch.rand((batch, size, channels), device='cuda', dtype=torch.half)
+    input = torch.rand((batch, size, channels), device='cuda')
     kernel = torch.rand((4, channels), device='cuda')
     
     quantiles = [0.5, 0.2, 0.8]
