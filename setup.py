@@ -79,6 +79,6 @@ setup(
     description="Example of PyTorch cpp and CUDA extensions",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/pytorch/extension-cpp",
+    url="https://github.com/PeaBrane/causal_conv1d_dw",
     cmdclass={"build_ext": BuildExtension},
 )
