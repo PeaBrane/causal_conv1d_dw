@@ -17,7 +17,7 @@ int cdiv(int a, int b) {
 }
 
 
-__device__ float silu(float x) {
+__device__ __inline__ float silu(float x) {
     return x / (1.0f + expf(-x));
 }
 
@@ -25,14 +25,14 @@ __device__ float silu(float x) {
 __global__ void causal_dw_conv1d_kernel(
   const float* input, const float* kernel, float* output, int length, int chs
 ) {
-  __shared__ float s_input[BLOCK][BLOCK+1];
+  __shared__ float s_input[BLOCK][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
 
   const int b_id = blockIdx.z;
   const int bl_stride = BLOCK - KERNEL_SIZE + 1;
   const int start_pos_id = blockIdx.y * bl_stride - KERNEL_SIZE + 1;
   const int start_ch_id = blockIdx.x * blockDim.x;
-  int ch_id = start_ch_id + threadIdx.x;
+  const int ch_id = start_ch_id + threadIdx.x;
 
   // load input block into SRAM
   for (int l = 0; l < BLOCK; ++l) {
@@ -40,7 +40,7 @@ __global__ void causal_dw_conv1d_kernel(
     if (pos_id >= 0 && pos_id < length && ch_id < chs) {
       s_input[l][threadIdx.x] = input[b_id * length * chs + pos_id * chs + ch_id];
     } else {
-      s_input[l][threadIdx.x] = 0.0f;
+      s_input[l][threadIdx.x] = (0.0f);
     }
   }
 
@@ -51,19 +51,15 @@ __global__ void causal_dw_conv1d_kernel(
 
   __syncthreads();
 
-  int pos_id = start_pos_id + threadIdx.x;
-  int store_pos_id = pos_id + KERNEL_SIZE - 1;
-
-  // circular convolution with masked write to output
-  for (int c = 0; c < BLOCK; ++c) {
-    ch_id = start_ch_id + c;
+  for (int l = 0; l <= BLOCK - KERNEL_SIZE; ++l) {
+    int store_pos_id = start_pos_id + l + KERNEL_SIZE - 1;
     float sum = 0.0f;
     for (int k = 0; k < KERNEL_SIZE; ++k) {
-      int l_index = (threadIdx.x + k) % BLOCK;
-      sum += s_kernel[k][c] * s_input[l_index][c];
+      int l_index = (l + k) % BLOCK;
+      sum += s_kernel[k][threadIdx.x] * (s_input[l_index][threadIdx.x]);
     }
-    if (threadIdx.x <= BLOCK - KERNEL_SIZE && store_pos_id < length && ch_id < chs) {
-      output[b_id * length * chs + store_pos_id * chs + ch_id] = silu(sum);
+    if (store_pos_id < length && ch_id < chs) {
+      output[b_id * length * chs + store_pos_id * chs + ch_id] = (silu(sum));
     }
   }
 
@@ -71,6 +67,8 @@ __global__ void causal_dw_conv1d_kernel(
 
 
 at::Tensor causal_dw_conv1d_cuda(const at::Tensor& input, const at::Tensor& kernel) {
+  TORCH_CHECK(input.dtype() == at::kFloat);
+  TORCH_CHECK(kernel.dtype() == at::kFloat);
   at::Tensor input_contig = input.contiguous();
   at::Tensor kernel_contig = kernel.contiguous();
   at::Tensor output = torch::empty(input.sizes(), input.options());
