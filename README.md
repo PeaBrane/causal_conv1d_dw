@@ -16,3 +16,9 @@ python test/test.py
 <p align="center">
   <img src="performance.png" alt="Performance">
 </p>
+
+## Current Limitations
+
+- Only supports fp32
+- Only supports transposed input of size (batch, length, channels) and kernel of size (4, channels), prominently used in Mamba
+- The layer is fused with SiLU (but can be easily modified)
