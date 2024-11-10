@@ -13,3 +13,6 @@ To test + benchmark:
 ```
 python test/test.py
 ```
+<p align="center">
+  <img src="performance.png" alt="Performance">
+</p>
