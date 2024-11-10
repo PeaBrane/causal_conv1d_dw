@@ -50,8 +50,8 @@ def do_backward(layer, args, gradient):
         x_vals=[2**i for i in range(10, 18, 1)],  # Different possible values for `x_name`.
         x_log=True,  # x axis is logarithmic.
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot.
-        line_vals=['torch', 'compiled', 'cuda'],  # Possible values for `line_arg`.
-        line_names=['torch', 'compiled', 'cuda'],  # Label name for the lines.
+        line_vals=['torch', 'compiled', 'cuda', 'clone'],  # Possible values for `line_arg`.
+        line_names=['torch', 'compiled', 'cuda', 'clone'],  # Label name for the lines.
         ylabel='GB/s',  # Label name for the y-axis.
         plot_name='performance',  # Name for the plot. Used also as a file name for saving the plot.
         args={},  # Values for function arguments not in `x_names` and `y_name`.
@@ -70,10 +70,10 @@ def benchmark(size, provider):
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: do_backward(causal_dw_conv1d_compiled, (input, kernel), gradient), quantiles=quantiles)
     if provider == 'cuda':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: do_backward(causal_dw_conv1d, (input, kernel), gradient), quantiles=quantiles)
-    if provider == 'dummy':
+    if provider == 'clone':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: input.clone(), quantiles=quantiles)
         gbps = lambda ms: 2 * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
-    if provider != 'dummy':
+    if provider != 'clone':
         gbps = lambda ms: 5 * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
