@@ -8,58 +8,43 @@
 
 namespace extension_cpp {
 
-
 #define KERNEL_SIZE 4
 #define BLOCK 32
 
+int cdiv(int a, int b) { return (a + b - 1) / b; }
 
-int cdiv(int a, int b) {
-  return (a + b - 1) / b;
-}
+__device__ __inline__ float sigmoid(float x) { return 1 / (1.0f + expf(-x)); }
 
-
-__device__ __inline__ float sigmoid(float x) {
-  return 1 / (1.0f + expf(-x));
-}
-
-
-__device__ __inline__ float silu(float x) {
-  return x / (1.0f + expf(-x));
-}
-
+__device__ __inline__ float silu(float x) { return x / (1.0f + expf(-x)); }
 
 __device__ __inline__ float silu_jacob(float x) {
   float x_sig = sigmoid(x);
   return x_sig * (1 + x * (1 - x_sig));
 }
 
-
 __global__ void causal_dw_conv1d_fwd_kernel(
-  const float* input, const float* kernel, float* output, int length, int chs
+  float* input, const float* kernel, float* output, int length, int chs
 ) {
   __shared__ float s_input[BLOCK][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
 
   constexpr int bl_stride = BLOCK - KERNEL_SIZE;
+  const int tid = threadIdx.x;
   const int b_id = blockIdx.z;
   const int start_pos_id = blockIdx.y * bl_stride - KERNEL_SIZE;
-  const int start_ch_id = blockIdx.x * blockDim.x;
-  const int ch_id = start_ch_id + threadIdx.x;
+  const int ch_id = blockIdx.x * blockDim.x + tid;
 
   // load input block into SRAM
   for (int l = 0; l < BLOCK; ++l) {
     int pos_id = start_pos_id + l;
     if (pos_id >= 0 && pos_id < length && ch_id < chs) {
-      s_input[l][threadIdx.x] = input[b_id * length * chs + pos_id * chs + ch_id];
-    } else {
-      s_input[l][threadIdx.x] = 0.0f;
-    }
+      s_input[l][tid] = input[b_id * length * chs + pos_id * chs + ch_id];
+    } else { s_input[l][tid] = 0.0f; }
   }
 
   // load kernel block into SRAM
-  for (int k = 0; k < KERNEL_SIZE; ++k) {
-    s_kernel[k][threadIdx.x] = kernel[k * chs + ch_id];
-  }
+  #pragma unroll
+  for (int k = 0; k < KERNEL_SIZE; ++k) { s_kernel[k][tid] = kernel[k * chs + ch_id]; }
 
   __syncthreads();
 
@@ -68,8 +53,8 @@ __global__ void causal_dw_conv1d_fwd_kernel(
     int store_pos_id = start_pos_id + l + KERNEL_SIZE - 1;
     float sum = 0.0f;
     #pragma unroll
-    for (int k = 0; k < KERNEL_SIZE; ++k) {
-      sum += s_kernel[k][threadIdx.x] * (s_input[l + k][threadIdx.x]);
+    for (int k = 0; k < KERNEL_SIZE; ++k) { 
+      sum += s_kernel[k][tid] * s_input[l + k][tid]; 
     }
     if (store_pos_id < length && ch_id < chs) {
       output[b_id * length * chs + store_pos_id * chs + ch_id] = silu(sum);
@@ -78,10 +63,9 @@ __global__ void causal_dw_conv1d_fwd_kernel(
 
 }
 
-
 at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& kernel) {
   at::Tensor output = torch::empty(input.sizes(), input.options());
-  const float* input_ptr = input.data_ptr<float>();
+  float* input_ptr = input.data_ptr<float>();
   const float* kernel_ptr = kernel.data_ptr<float>();
   float* output_ptr = output.data_ptr<float>();
   // const __half* input_ptr = reinterpret_cast<const __half*>(input_contig.data_ptr<at::Half>());
@@ -99,37 +83,33 @@ at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& 
   return output;
 }
 
-
 __global__ void causal_dw_conv1d_bwd_kernel(
   const float* input, const float* kernel, const float* grad_output, 
   float* grad_input, float* grad_kernel, 
   int length, int chs
 ) {
   __shared__ float s_input[BLOCK][BLOCK];
-  __shared__ float s_output[BLOCK-KERNEL_SIZE][BLOCK];
+  __shared__ float s_output[BLOCK - KERNEL_SIZE][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
-  __shared__ float s_grad_output[BLOCK-KERNEL_SIZE][BLOCK];
+  __shared__ float s_grad_output[BLOCK - KERNEL_SIZE][BLOCK];
 
   constexpr int bl_stride = BLOCK - 2 * KERNEL_SIZE;  // halos on both sides
+  const int tid = threadIdx.x;
   const int b_id = blockIdx.z;
   const int start_pos_id = blockIdx.y * bl_stride;
-  const int start_ch_id = blockIdx.x * blockDim.x;
-  const int ch_id = start_ch_id + threadIdx.x;
+  const int ch_id = blockIdx.x * blockDim.x + tid;
 
   // load input block into SRAM
   for (int l = 0; l < BLOCK; ++l) {
     int pos_id = start_pos_id + l - KERNEL_SIZE;
     if (pos_id >= 0 && pos_id < length && ch_id < chs) {
-      s_input[l][threadIdx.x] = input[b_id * length * chs + pos_id * chs + ch_id];
-    } else {
-      s_input[l][threadIdx.x] = 0.0f;
-    }
+      s_input[l][tid] = input[b_id * length * chs + pos_id * chs + ch_id];
+    } else { s_input[l][tid] = 0.0f; }
   }
 
   // load kernel block into SRAM
-  for (int k = 0; k < KERNEL_SIZE; ++k) {
-    s_kernel[k][threadIdx.x] = kernel[k * chs + ch_id];
-  }
+  #pragma unroll
+  for (int k = 0; k < KERNEL_SIZE; ++k) { s_kernel[k][tid] = kernel[k * chs + ch_id]; }
 
   __syncthreads();
 
@@ -137,10 +117,8 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   for (int l = 1; l < BLOCK - KERNEL_SIZE; ++l) {
     float sum = 0.0f;
     #pragma unroll
-    for (int k = 0; k < KERNEL_SIZE; ++k) {
-      sum += s_kernel[k][threadIdx.x] * (s_input[l + k][threadIdx.x]);
-    }
-    s_output[l-1][threadIdx.x] = silu_jacob(sum);
+    for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[k][tid] * (s_input[l + k][tid]); }
+    s_output[l-1][tid] = silu_jacob(sum);
   }
 
   __syncthreads();
@@ -150,9 +128,9 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int pos_id = start_pos_id + l;
     if (pos_id < length && ch_id < chs) {
       int load_id = b_id * length * chs + pos_id * chs + ch_id;
-      s_grad_output[l][threadIdx.x] = grad_output[load_id] * s_output[l][threadIdx.x];
+      s_grad_output[l][tid] = grad_output[load_id] * s_output[l][tid];
     } else {
-      s_grad_output[l][threadIdx.x] = 0.0f;
+      s_grad_output[l][tid] = 0.0f;
     }
   }
 
@@ -163,9 +141,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int store_pos_id = start_pos_id + l;
     float sum = 0.0f;
     #pragma unroll
-    for (int k = 0; k < KERNEL_SIZE; ++k) {
-      sum += s_kernel[KERNEL_SIZE - 1 - k][threadIdx.x] * s_grad_output[l + k][threadIdx.x];
-    }
+    for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[KERNEL_SIZE - 1 - k][tid] * s_grad_output[l + k][tid]; }
     if (store_pos_id < length && ch_id < chs) {
       grad_input[b_id * length * chs + store_pos_id * chs + ch_id] = sum;
     }
@@ -176,12 +152,11 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int store_id = (KERNEL_SIZE - 1 - k) * gridDim.z * gridDim.y * chs + b_id * gridDim.y * chs + blockIdx.y * chs + ch_id;
     float sum = 0.0f;
     for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
-      sum += s_input[l + KERNEL_SIZE][threadIdx.x] * s_grad_output[l + k][threadIdx.x];
+      sum += s_input[l + KERNEL_SIZE][tid] * s_grad_output[l + k][tid];
     }
     grad_kernel[store_id] = sum;
   }
 }
-
 
 void causal_dw_conv1d_bwd_cuda(
   const at::Tensor& input, const at::Tensor& kernel, const at::Tensor& grad_output, 
@@ -205,8 +180,6 @@ void causal_dw_conv1d_bwd_cuda(
   );
 }
 
-
-// Registers CUDA implementations for mymuladd, mymul, myadd_out
 TORCH_LIBRARY_IMPL(extension_cpp, CUDA, m) {
   m.impl("causal_dw_conv1d_fwd", &causal_dw_conv1d_fwd_cuda);
   m.impl("causal_dw_conv1d_bwd", &causal_dw_conv1d_bwd_cuda);
