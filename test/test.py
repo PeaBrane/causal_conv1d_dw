@@ -39,7 +39,11 @@ assert torch.allclose(output_1, output_ref, rtol=1e-3, atol=1e-2)
 assert torch.allclose(input_grad, input_grad_ref, rtol=1e-3, atol=1e-2)
 
 
-def do_backward(layer, args, gradient):
+def do_backward(layer, args, gradient, forward_only=True):
+    if forward_only:
+        with torch.no_grad():
+            return layer(*args)
+    
     output = layer(*args)
     output.backward(gradient)
 
@@ -58,23 +62,30 @@ def do_backward(layer, args, gradient):
     ))
 
 
-def benchmark(size, provider):
+def benchmark(size, provider, forward_only=True):
     input = torch.rand((batch, size, channels), device='cuda', requires_grad=True)
     kernel = torch.rand((4, channels), device='cuda', requires_grad=True)
     gradient = torch.rand_like(input.detach())
     
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'torch':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: do_backward(causal_dw_conv1d_ref, (input, kernel), gradient), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: do_backward(causal_dw_conv1d_ref, (input, kernel), gradient, forward_only=forward_only), quantiles=quantiles
+        )
     if provider == 'compiled':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: do_backward(causal_dw_conv1d_compiled, (input, kernel), gradient), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: do_backward(causal_dw_conv1d_compiled, (input, kernel), gradient, forward_only=forward_only), quantiles=quantiles
+        )
     if provider == 'cuda':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: do_backward(causal_dw_conv1d, (input, kernel), gradient), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: do_backward(causal_dw_conv1d, (input, kernel), gradient, forward_only=forward_only), quantiles=quantiles
+        )
     if provider == 'clone':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: input.clone(), quantiles=quantiles)
         gbps = lambda ms: 2 * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
     if provider != 'clone':
-        gbps = lambda ms: 5 * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
+        scale = 2 if forward_only else 5
+        gbps = lambda ms: scale * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 
