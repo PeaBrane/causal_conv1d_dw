@@ -47,11 +47,11 @@ def do_backward(layer, args, gradient):
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['size'],  # Argument names to use as an x-axis for the plot.
-        x_vals=[2**i for i in range(10, 16, 1)],  # Different possible values for `x_name`.
+        x_vals=[2**i for i in range(10, 18, 1)],  # Different possible values for `x_name`.
         x_log=True,  # x axis is logarithmic.
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot.
-        line_vals=['torch', 'compiled', 'dummy', 'cuda'],  # Possible values for `line_arg`.
-        line_names=['torch', 'compiled', 'dummy', 'cuda'],  # Label name for the lines.
+        line_vals=['torch', 'compiled', 'cuda'],  # Possible values for `line_arg`.
+        line_names=['torch', 'compiled', 'cuda'],  # Label name for the lines.
         ylabel='GB/s',  # Label name for the y-axis.
         plot_name='performance',  # Name for the plot. Used also as a file name for saving the plot.
         args={},  # Values for function arguments not in `x_names` and `y_name`.
