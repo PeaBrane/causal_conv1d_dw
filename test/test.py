@@ -9,7 +9,7 @@ def causal_dw_conv1d_ref(input, kernel):
     input_t = input.moveaxis(-1, -2)
     output = F.conv1d(F.pad(input_t, (3, 0)), kernel.T[:, None, :], groups=channels)
     output_t = output.moveaxis(-1, -2)
-    return output_t.contiguous()
+    return F.silu(output_t).contiguous()
 
 
 causal_dw_conv1d_compiled = torch.compile(causal_dw_conv1d_ref)

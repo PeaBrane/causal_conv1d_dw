@@ -14,12 +14,23 @@ namespace extension_cpp {
 
 
 int cdiv(int a, int b) {
-    return (a + b - 1) / b;
+  return (a + b - 1) / b;
+}
+
+
+__device__ __inline__ float sigmoid(float x) {
+  return 1 / (1.0f + expf(-x));
 }
 
 
 __device__ __inline__ float silu(float x) {
-    return x / (1.0f + expf(-x));
+  return x / (1.0f + expf(-x));
+}
+
+
+__device__ __inline__ float silu_jacob(float x) {
+  float x_sig = sigmoid(x);
+  return x_sig * (1 + x * (1 - x_sig));
 }
 
 
@@ -29,8 +40,8 @@ __global__ void causal_dw_conv1d_fwd_kernel(
   __shared__ float s_input[BLOCK][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
 
+  constexpr int bl_stride = BLOCK - KERNEL_SIZE;
   const int b_id = blockIdx.z;
-  const int bl_stride = BLOCK - KERNEL_SIZE;
   const int start_pos_id = blockIdx.y * bl_stride - KERNEL_SIZE;
   const int start_ch_id = blockIdx.x * blockDim.x;
   const int ch_id = start_ch_id + threadIdx.x;
@@ -52,6 +63,7 @@ __global__ void causal_dw_conv1d_fwd_kernel(
 
   __syncthreads();
 
+  // compute output
   for (int l = 1; l <= BLOCK - KERNEL_SIZE; ++l) {
     int store_pos_id = start_pos_id + l + KERNEL_SIZE - 1;
     float sum = 0.0f;
@@ -60,7 +72,7 @@ __global__ void causal_dw_conv1d_fwd_kernel(
       sum += s_kernel[k][threadIdx.x] * (s_input[l + k][threadIdx.x]);
     }
     if (store_pos_id < length && ch_id < chs) {
-      output[b_id * length * chs + store_pos_id * chs + ch_id] = sum;
+      output[b_id * length * chs + store_pos_id * chs + ch_id] = silu(sum);
     }
   }
 
@@ -98,8 +110,8 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
   __shared__ float s_grad_output[BLOCK-KERNEL_SIZE][BLOCK];
 
+  constexpr int bl_stride = BLOCK - 2 * KERNEL_SIZE;  // halos on both sides
   const int b_id = blockIdx.z;
-  const int bl_stride = BLOCK - 2 * KERNEL_SIZE;  // halos on both sides
   const int start_pos_id = blockIdx.y * bl_stride;
   const int start_ch_id = blockIdx.x * blockDim.x;
   const int ch_id = start_ch_id + threadIdx.x;
@@ -119,11 +131,26 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     s_kernel[k][threadIdx.x] = kernel[k * chs + ch_id];
   }
 
-  // load grad_output block into SRAM
-  for (int l = 0; l < BLOCK - KERNEL_SIZE; ++l) {
+  __syncthreads();
+
+  // recompute output
+  for (int l = 1; l < BLOCK - KERNEL_SIZE; ++l) {
+    float sum = 0.0f;
+    #pragma unroll
+    for (int k = 0; k < KERNEL_SIZE; ++k) {
+      sum += s_kernel[k][threadIdx.x] * (s_input[l + k][threadIdx.x]);
+    }
+    s_output[l-1][threadIdx.x] = silu_jacob(sum);
+  }
+
+  __syncthreads();
+
+  // load and modify grad_output block into SRAM
+  for (int l = 0; l < BLOCK - KERNEL_SIZE - 1; ++l) {
     int pos_id = start_pos_id + l;
     if (pos_id < length && ch_id < chs) {
-      s_grad_output[l][threadIdx.x] = grad_output[b_id * length * chs + pos_id * chs + ch_id];
+      int load_id = b_id * length * chs + pos_id * chs + ch_id;
+      s_grad_output[l][threadIdx.x] = grad_output[load_id] * s_output[l][threadIdx.x];
     } else {
       s_grad_output[l][threadIdx.x] = 0.0f;
     }
