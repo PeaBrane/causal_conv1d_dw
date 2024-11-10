@@ -89,9 +89,12 @@ at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& 
 
 
 __global__ void causal_dw_conv1d_bwd_kernel(
-  const float* kernel, const float* grad_output, float* grad_input, 
+  const float* input, const float* kernel, const float* grad_output, 
+  float* grad_input, float* grad_kernel, 
   int length, int chs
 ) {
+  __shared__ float s_input[BLOCK][BLOCK];
+  __shared__ float s_output[BLOCK-KERNEL_SIZE][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
   __shared__ float s_grad_output[BLOCK-KERNEL_SIZE][BLOCK];
 
@@ -100,6 +103,16 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   const int start_pos_id = blockIdx.y * bl_stride;
   const int start_ch_id = blockIdx.x * blockDim.x;
   const int ch_id = start_ch_id + threadIdx.x;
+
+  // load input block into SRAM
+  for (int l = 0; l < BLOCK; ++l) {
+    int pos_id = start_pos_id + l - KERNEL_SIZE;
+    if (pos_id >= 0 && pos_id < length && ch_id < chs) {
+      s_input[l][threadIdx.x] = input[b_id * length * chs + pos_id * chs + ch_id];
+    } else {
+      s_input[l][threadIdx.x] = 0.0f;
+    }
+  }
 
   // load kernel block into SRAM
   for (int k = 0; k < KERNEL_SIZE; ++k) {
@@ -117,7 +130,8 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   }
 
   __syncthreads();
-
+  
+  // compute grad_input
   for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
     int store_pos_id = start_pos_id + l;
     float sum = 0.0f;
@@ -130,14 +144,27 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     }
   }
 
+  // compute grad_kernel
+  for (int k = 0; k < KERNEL_SIZE; ++k) {
+    int store_id = (KERNEL_SIZE - 1 - k) * gridDim.z * gridDim.y * chs + b_id * gridDim.y * chs + blockIdx.y * chs + ch_id;
+    float sum = 0.0f;
+    for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
+      sum += s_input[l + KERNEL_SIZE][threadIdx.x] * s_grad_output[l + k][threadIdx.x];
+    }
+    grad_kernel[store_id] = sum;
+  }
 }
 
 
-at::Tensor causal_dw_conv1d_bwd_cuda(const at::Tensor& grad_output, const at::Tensor& kernel) {
-  at::Tensor grad_input = torch::empty(grad_output.sizes(), grad_output.options());
+void causal_dw_conv1d_bwd_cuda(
+  const at::Tensor& input, const at::Tensor& kernel, const at::Tensor& grad_output, 
+  at::Tensor& grad_input, at::Tensor& grad_kernel
+) {
+  const float* input_ptr = input.data_ptr<float>();
   const float* grad_output_ptr = grad_output.data_ptr<float>();
   const float* kernel_ptr = kernel.data_ptr<float>();
   float* grad_input_ptr = grad_input.data_ptr<float>();
+  float* grad_kernel_ptr = grad_kernel.data_ptr<float>();
 
   int batch = grad_output.size(0);
   int length = grad_output.size(1);
@@ -146,8 +173,9 @@ at::Tensor causal_dw_conv1d_bwd_cuda(const at::Tensor& grad_output, const at::Te
   dim3 gridDim(cdiv(chs, BLOCK), cdiv(length, BLOCK - 2 * KERNEL_SIZE), batch);
   dim3 blockDim(BLOCK, 1, 1);
 
-  causal_dw_conv1d_bwd_kernel<<<gridDim, blockDim>>>(kernel_ptr, grad_output_ptr, grad_input_ptr, length, chs);
-  return grad_input;
+  causal_dw_conv1d_bwd_kernel<<<gridDim, blockDim>>>(
+    input_ptr, kernel_ptr, grad_output_ptr, grad_input_ptr, grad_kernel_ptr, length, chs
+  );
 }
 
 

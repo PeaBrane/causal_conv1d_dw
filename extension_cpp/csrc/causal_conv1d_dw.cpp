@@ -18,7 +18,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
 // Defines the operators
 TORCH_LIBRARY(extension_cpp, m) {
   m.def("causal_dw_conv1d_fwd(Tensor input, Tensor kernel) -> Tensor");
-  m.def("causal_dw_conv1d_bwd(Tensor grad_output, Tensor kernel) -> Tensor");
+  m.def("causal_dw_conv1d_bwd(Tensor input, Tensor kernel, Tensor grad_output, Tensor grad_input, Tensor grad_kernel) -> ()");
 }
 
 // Registers CUDA implementations for mymuladd, mymul, myadd_out
