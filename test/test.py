@@ -62,7 +62,7 @@ def do_backward(layer, args, gradient, forward_only=True):
     ))
 
 
-def benchmark(size, provider, forward_only=True):
+def benchmark(size, provider, forward_only=False):
     input = torch.rand((batch, size, channels), device='cuda', requires_grad=True)
     kernel = torch.rand((4, channels), device='cuda', requires_grad=True)
     gradient = torch.rand_like(input.detach())
@@ -83,9 +83,11 @@ def benchmark(size, provider, forward_only=True):
     if provider == 'clone':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: input.clone(), quantiles=quantiles)
         gbps = lambda ms: 2 * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
+        
     if provider != 'clone':
-        scale = 2 if forward_only else 5
+        scale = 2 if forward_only else 8
         gbps = lambda ms: scale * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
+        
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 

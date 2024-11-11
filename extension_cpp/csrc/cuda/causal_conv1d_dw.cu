@@ -46,8 +46,6 @@ __global__ void causal_dw_conv1d_fwd_kernel(
   #pragma unroll
   for (int k = 0; k < KERNEL_SIZE; ++k) { s_kernel[k][tid] = kernel[k * chs + ch_id]; }
 
-  __syncthreads();
-
   // compute output
   for (int l = 1; l <= BLOCK - KERNEL_SIZE; ++l) {
     int store_pos_id = start_pos_id + l + KERNEL_SIZE - 1;
@@ -91,7 +89,6 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   __shared__ float s_input[BLOCK][BLOCK];
   __shared__ float s_output[BLOCK - KERNEL_SIZE][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
-  __shared__ float s_grad_output[BLOCK - KERNEL_SIZE][BLOCK];
 
   constexpr int bl_stride = BLOCK - 2 * KERNEL_SIZE;  // halos on both sides
   const int tid = threadIdx.x;
@@ -111,37 +108,36 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   #pragma unroll
   for (int k = 0; k < KERNEL_SIZE; ++k) { s_kernel[k][tid] = kernel[k * chs + ch_id]; }
 
-  __syncthreads();
+  // load grad_output block into SRAM
+  for (int l = 0; l < BLOCK - KERNEL_SIZE - 1; ++l) {
+    int pos_id = start_pos_id + l;
+    int load_id = b_id * length * chs + pos_id * chs + ch_id;
+    s_output[l][tid] = (pos_id < length && ch_id < chs) ? grad_output[load_id] : 0.0f;
+  }
 
   // recompute output
   for (int l = 1; l < BLOCK - KERNEL_SIZE; ++l) {
     float sum = 0.0f;
     #pragma unroll
     for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[k][tid] * (s_input[l + k][tid]); }
-    s_output[l-1][tid] = silu_jacob(sum);
+    s_output[l-1][tid] *= silu_jacob(sum);
   }
-
-  __syncthreads();
 
   // load and modify grad_output block into SRAM
-  for (int l = 0; l < BLOCK - KERNEL_SIZE - 1; ++l) {
-    int pos_id = start_pos_id + l;
-    if (pos_id < length && ch_id < chs) {
-      int load_id = b_id * length * chs + pos_id * chs + ch_id;
-      s_grad_output[l][tid] = grad_output[load_id] * s_output[l][tid];
-    } else {
-      s_grad_output[l][tid] = 0.0f;
-    }
-  }
-
-  __syncthreads();
+  // for (int l = 0; l < BLOCK - KERNEL_SIZE - 1; ++l) {
+  //   int pos_id = start_pos_id + l;
+  //   if (pos_id < length && ch_id < chs) {
+  //     int load_id = b_id * length * chs + pos_id * chs + ch_id;
+  //     s_output[l][tid] = grad_output[load_id] * s_output[l][tid];
+  //   } else { s_output[l][tid] = 0.0f; }
+  // }
   
   // compute grad_input
   for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
     int store_pos_id = start_pos_id + l;
     float sum = 0.0f;
     #pragma unroll
-    for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[KERNEL_SIZE - 1 - k][tid] * s_grad_output[l + k][tid]; }
+    for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[KERNEL_SIZE - 1 - k][tid] * s_output[l + k][tid]; }
     if (store_pos_id < length && ch_id < chs) {
       grad_input[b_id * length * chs + store_pos_id * chs + ch_id] = sum;
     }
@@ -152,7 +148,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int store_id = (KERNEL_SIZE - 1 - k) * gridDim.z * gridDim.y * chs + b_id * gridDim.y * chs + blockIdx.y * chs + ch_id;
     float sum = 0.0f;
     for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
-      sum += s_input[l + KERNEL_SIZE][tid] * s_grad_output[l + k][tid];
+      sum += s_input[l + KERNEL_SIZE][tid] * s_output[l + k][tid];
     }
     grad_kernel[store_id] = sum;
   }
