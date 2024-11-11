@@ -23,9 +23,9 @@ __device__ __inline__ float silu_jacob(float x) {
 }
 
 __global__ void causal_dw_conv1d_fwd_kernel(
-  float* input, const float* kernel, float* output, int length, int chs
+  const __half* input, const float* kernel, __half* output, int length, int chs
 ) {
-  __shared__ float s_input[BLOCK][BLOCK];
+  __shared__ __half s_input[BLOCK][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
 
   constexpr int bl_stride = BLOCK - KERNEL_SIZE;
@@ -39,7 +39,7 @@ __global__ void causal_dw_conv1d_fwd_kernel(
     int pos_id = start_pos_id + l;
     if (pos_id >= 0 && pos_id < length && ch_id < chs) {
       s_input[l][tid] = input[b_id * length * chs + pos_id * chs + ch_id];
-    } else { s_input[l][tid] = 0.0f; }
+    } else { s_input[l][tid] = __float2half(0.0f); }
   }
 
   // load kernel block into SRAM
@@ -52,10 +52,10 @@ __global__ void causal_dw_conv1d_fwd_kernel(
     float sum = 0.0f;
     #pragma unroll
     for (int k = 0; k < KERNEL_SIZE; ++k) { 
-      sum += s_kernel[k][tid] * s_input[l + k][tid]; 
+      sum += s_kernel[k][tid] * __half2float(s_input[l + k][tid]); 
     }
     if (store_pos_id < length && ch_id < chs) {
-      output[b_id * length * chs + store_pos_id * chs + ch_id] = silu(sum);
+      output[b_id * length * chs + store_pos_id * chs + ch_id] = __float2half(silu(sum));
     }
   }
 
@@ -63,12 +63,12 @@ __global__ void causal_dw_conv1d_fwd_kernel(
 
 at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& kernel) {
   at::Tensor output = torch::empty(input.sizes(), input.options());
-  float* input_ptr = input.data_ptr<float>();
+  // float* input_ptr = input.data_ptr<float>();
+  // const float* kernel_ptr = kernel.data_ptr<float>();
+  // float* output_ptr = output.data_ptr<float>();
+  const __half* input_ptr = reinterpret_cast<const __half*>(input.data_ptr<at::Half>());
   const float* kernel_ptr = kernel.data_ptr<float>();
-  float* output_ptr = output.data_ptr<float>();
-  // const __half* input_ptr = reinterpret_cast<const __half*>(input_contig.data_ptr<at::Half>());
-  // const float* kernel_ptr = kernel_contig.data_ptr<float>();
-  // __half* output_ptr = reinterpret_cast<__half*>(output.data_ptr<at::Half>());
+  __half* output_ptr = reinterpret_cast<__half*>(output.data_ptr<at::Half>());
 
   int batch = input.size(0);
   int length = input.size(1);
@@ -82,11 +82,11 @@ at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& 
 }
 
 __global__ void causal_dw_conv1d_bwd_kernel(
-  const float* input, const float* kernel, const float* grad_output, 
-  float* grad_input, float* grad_kernel, 
+  const __half* input, const float* kernel, const __half* grad_output, 
+  __half* grad_input, float* grad_kernel, 
   int length, int chs
 ) {
-  __shared__ float s_input[BLOCK][BLOCK];
+  __shared__ __half s_input[BLOCK][BLOCK];
   __shared__ float s_output[BLOCK - KERNEL_SIZE][BLOCK];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
 
@@ -101,7 +101,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int pos_id = start_pos_id + l - KERNEL_SIZE;
     if (pos_id >= 0 && pos_id < length && ch_id < chs) {
       s_input[l][tid] = input[b_id * length * chs + pos_id * chs + ch_id];
-    } else { s_input[l][tid] = 0.0f; }
+    } else { s_input[l][tid] = __float2half(0.0f); }
   }
 
   // load kernel block into SRAM
@@ -112,25 +112,16 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   for (int l = 0; l < BLOCK - KERNEL_SIZE - 1; ++l) {
     int pos_id = start_pos_id + l;
     int load_id = b_id * length * chs + pos_id * chs + ch_id;
-    s_output[l][tid] = (pos_id < length && ch_id < chs) ? grad_output[load_id] : 0.0f;
+    s_output[l][tid] = (pos_id < length && ch_id < chs) ? __half2float(grad_output[load_id]) : 0.0f;
   }
 
   // recompute output
   for (int l = 1; l < BLOCK - KERNEL_SIZE; ++l) {
     float sum = 0.0f;
     #pragma unroll
-    for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[k][tid] * (s_input[l + k][tid]); }
+    for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[k][tid] * __half2float(s_input[l + k][tid]); }
     s_output[l-1][tid] *= silu_jacob(sum);
   }
-
-  // load and modify grad_output block into SRAM
-  // for (int l = 0; l < BLOCK - KERNEL_SIZE - 1; ++l) {
-  //   int pos_id = start_pos_id + l;
-  //   if (pos_id < length && ch_id < chs) {
-  //     int load_id = b_id * length * chs + pos_id * chs + ch_id;
-  //     s_output[l][tid] = grad_output[load_id] * s_output[l][tid];
-  //   } else { s_output[l][tid] = 0.0f; }
-  // }
   
   // compute grad_input
   for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
@@ -139,7 +130,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     #pragma unroll
     for (int k = 0; k < KERNEL_SIZE; ++k) { sum += s_kernel[KERNEL_SIZE - 1 - k][tid] * s_output[l + k][tid]; }
     if (store_pos_id < length && ch_id < chs) {
-      grad_input[b_id * length * chs + store_pos_id * chs + ch_id] = sum;
+      grad_input[b_id * length * chs + store_pos_id * chs + ch_id] = __float2half(sum);
     }
   }
 
@@ -148,7 +139,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int store_id = (KERNEL_SIZE - 1 - k) * gridDim.z * gridDim.y * chs + b_id * gridDim.y * chs + blockIdx.y * chs + ch_id;
     float sum = 0.0f;
     for (int l = 0; l < BLOCK - 2 * KERNEL_SIZE; ++l) {
-      sum += s_input[l + KERNEL_SIZE][tid] * s_output[l + k][tid];
+      sum += __half2float(s_input[l + KERNEL_SIZE][tid]) * s_output[l + k][tid];
     }
     grad_kernel[store_id] = sum;
   }
@@ -158,10 +149,11 @@ void causal_dw_conv1d_bwd_cuda(
   const at::Tensor& input, const at::Tensor& kernel, const at::Tensor& grad_output, 
   at::Tensor& grad_input, at::Tensor& grad_kernel
 ) {
-  const float* input_ptr = input.data_ptr<float>();
-  const float* grad_output_ptr = grad_output.data_ptr<float>();
+  // const float* input_ptr = input.data_ptr<float>();
+  const __half* input_ptr = reinterpret_cast<const __half*>(input.data_ptr<at::Half>());
+  const __half* grad_output_ptr = reinterpret_cast<const __half*>(grad_output.data_ptr<at::Half>());
   const float* kernel_ptr = kernel.data_ptr<float>();
-  float* grad_input_ptr = grad_input.data_ptr<float>();
+  __half* grad_input_ptr = reinterpret_cast<__half*>(grad_input.data_ptr<at::Half>());
   float* grad_kernel_ptr = grad_kernel.data_ptr<float>();
 
   int batch = grad_output.size(0);

@@ -7,11 +7,13 @@ KERNEL_SIZE = 4
 
 
 class CausalDwConv1d(torch.autograd.Function):
+    @torch.amp.custom_fwd(device_type='cuda')
     @staticmethod
     def forward(ctx, input: torch.Tensor, kernel: torch.Tensor):
         ctx.save_for_backward(input, kernel)
         return torch.ops.extension_cpp.causal_dw_conv1d_fwd.default(input, kernel)
-        
+    
+    @torch.amp.custom_bwd(device_type='cuda')
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         input, kernel = ctx.saved_tensors

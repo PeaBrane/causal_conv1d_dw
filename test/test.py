@@ -16,11 +16,12 @@ causal_dw_conv1d_compiled = torch.compile(causal_dw_conv1d_ref)
 
 batch, length, channels = 4, 2048, 512
 
-input = torch.rand(batch, length, channels, device='cuda', requires_grad=True)
+input = torch.rand(batch, length, channels, device='cuda', requires_grad=True, dtype=torch.half)
 kernel = torch.rand(batch, channels, device='cuda', requires_grad=True)
-gradient = torch.rand_like(input.detach()).float()
+gradient = torch.rand_like(input.detach())
 
-output = causal_dw_conv1d(input, kernel)
+with torch.autocast('cuda'):
+    output = causal_dw_conv1d(input, kernel)
 output_1 = output.detach().clone()
 output.backward(gradient)
 input_grad = input.grad.clone()
@@ -28,7 +29,8 @@ k_grad = kernel.grad.clone()
 input.grad.zero_()
 kernel.grad.zero_()
 
-output = causal_dw_conv1d_ref(input, kernel)
+with torch.autocast('cuda'):
+    output = causal_dw_conv1d_ref(input, kernel)
 output_ref = output.detach().clone()
 output.backward(gradient)
 input_grad_ref = input.grad.clone()
@@ -39,12 +41,13 @@ assert torch.allclose(output_1, output_ref, rtol=1e-3, atol=1e-2)
 assert torch.allclose(input_grad, input_grad_ref, rtol=1e-3, atol=1e-2)
 
 
-def do_backward(layer, args, gradient, forward_only=True):
-    if forward_only:
-        with torch.no_grad():
-            return layer(*args)
-    
-    output = layer(*args)
+def do_backward(layer, args, gradient, forward_only=False):
+    with torch.autocast('cuda'):
+        if forward_only:
+            with torch.no_grad():
+                return layer(*args)
+        output = layer(*args)
+        
     output.backward(gradient)
 
 
@@ -62,8 +65,9 @@ def do_backward(layer, args, gradient, forward_only=True):
     ))
 
 
-def benchmark(size, provider, forward_only=False):
-    input = torch.rand((batch, size, channels), device='cuda', requires_grad=True)
+def benchmark(size, provider, forward_only=True):
+    input = torch.rand((batch, size, channels), device='cuda', requires_grad=True, dtype=torch.half)
+    input_float = input.detach().float()
     kernel = torch.rand((4, channels), device='cuda', requires_grad=True)
     gradient = torch.rand_like(input.detach())
     
@@ -82,12 +86,9 @@ def benchmark(size, provider, forward_only=False):
         )
     if provider == 'clone':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: input.clone(), quantiles=quantiles)
-        gbps = lambda ms: 2 * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
         
-    if provider != 'clone':
-        scale = 2 if forward_only else 8
-        gbps = lambda ms: scale * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
-        
+    scale = 2 if (provider == 'clone' or forward_only) else 8
+    gbps = lambda ms: scale * input.numel() * input.element_size() * 1e-9 / (ms * 1e-3)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 
