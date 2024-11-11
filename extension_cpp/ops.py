@@ -10,6 +10,7 @@ class CausalDwConv1d(torch.autograd.Function):
     @torch.amp.custom_fwd(device_type='cuda')
     @staticmethod
     def forward(ctx, input: torch.Tensor, kernel: torch.Tensor):
+        assert input.shape[-1] % 2 == 0  # channel has to be multiple of 2 for now
         ctx.save_for_backward(input, kernel)
         return torch.ops.extension_cpp.causal_dw_conv1d_fwd.default(input, kernel)
     

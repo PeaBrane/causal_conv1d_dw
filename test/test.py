@@ -12,6 +12,11 @@ def causal_dw_conv1d_ref(input, kernel):
     return F.silu(output_t).contiguous()
 
 
+def zero_grad(*args):
+    for arg in args:
+        arg.grad = None
+
+
 causal_dw_conv1d_compiled = torch.compile(causal_dw_conv1d_ref)
 
 batch, length, channels = 4, 2048, 512
@@ -26,8 +31,7 @@ output_1 = output.detach().clone()
 output.backward(gradient)
 input_grad = input.grad.clone()
 k_grad = kernel.grad.clone()
-input.grad.zero_()
-kernel.grad.zero_()
+zero_grad(input, kernel)
 
 with torch.autocast('cuda'):
     output = causal_dw_conv1d_ref(input, kernel)
@@ -36,8 +40,8 @@ output.backward(gradient)
 input_grad_ref = input.grad.clone()
 k_grad_ref = kernel.grad.clone()
 
-assert torch.allclose(k_grad, k_grad_ref, rtol=1e-3, atol=1e-2)
 assert torch.allclose(output_1, output_ref, rtol=1e-3, atol=1e-2)
+assert torch.allclose(k_grad, k_grad_ref, rtol=1e-3, atol=1e-2)
 assert torch.allclose(input_grad, input_grad_ref, rtol=1e-3, atol=1e-2)
 
 
