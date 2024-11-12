@@ -137,8 +137,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
       tmp1 += s_kernel[k][tid] * __low2float(s_input[l + k][tid]);
       tmp2 += s_kernel[k][tid+hb] * __high2float(s_input[l + k][tid]);
     }
-    s_output[l-1][tid] *= silu_jacob(tmp1);
-    s_output[l-1][tid + hb] *= silu_jacob(tmp2);
+    s_output[l-1][tid] *= silu_jacob(tmp1); s_output[l-1][tid + hb] *= silu_jacob(tmp2);
   }
   
   // compute grad_input
@@ -165,8 +164,9 @@ __global__ void causal_dw_conv1d_bwd_kernel(
       tmp1 += __low2float(s_input[l + KERNEL_SIZE][tid]) * s_output[l + k][tid];
       tmp2 += __high2float(s_input[l + KERNEL_SIZE][tid]) * s_output[l + k][tid + hb];
     }
-    grad_kernel[offset] = tmp1;
-    grad_kernel[offset+1] = tmp2;
+    if (ch_id < chs) {
+      grad_kernel[offset] = tmp1; grad_kernel[offset+1] = tmp2;
+    }
   }
 }
 
