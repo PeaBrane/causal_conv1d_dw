@@ -10,7 +10,7 @@ namespace extension_cpp {
 
 #define KERNEL_SIZE 4
 #define BLOCK 64
-#define BL 32
+#define BL 36
 
 int cdiv(int a, int b) { return (a + b - 1) / b; }
 
@@ -87,6 +87,9 @@ at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& 
   return output;
 }
 
+#undef BL
+#define BL 24
+
 __global__ void causal_dw_conv1d_bwd_kernel(
   const __half* input, const float* kernel, const __half* grad_output, 
   __half* grad_input, float* grad_kernel, 
@@ -124,9 +127,12 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   for (int l = 0; l < BL - KERNEL_SIZE - 1; ++l) {
     int pos_id = start_pos_id + l;
     int offset = b_id * length * chs + pos_id * chs + ch_id;
-    __half2 tmp = reinterpret_cast<const __half2*>(grad_output + offset)[0];
-    s_output[l][tid] = (pos_id < length && ch_id < chs) ? __low2float(tmp) : 0.0f;
-    s_output[l][tid + hb] = (pos_id < length && ch_id < chs) ? __high2float(tmp) : 0.0f;
+    if (pos_id < length && ch_id < chs) {
+      __half2 tmp = reinterpret_cast<const __half2*>(grad_output + offset)[0];
+      s_output[l][tid] = __low2float(tmp); s_output[l][tid + hb] = __high2float(tmp);
+    } else {
+      s_output[l][tid] = 0.0f; s_output[l][tid + hb] = 0.0f;
+    }
   }
 
   // recompute output
