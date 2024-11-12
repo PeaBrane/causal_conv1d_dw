@@ -39,6 +39,7 @@ output_ref = output.detach().clone()
 output.backward(gradient)
 input_grad_ref = input.grad.clone()
 k_grad_ref = kernel.grad.clone()
+zero_grad(input, kernel)
 
 assert torch.allclose(output_1, output_ref, rtol=1e-3, atol=1e-2)
 assert torch.allclose(k_grad, k_grad_ref, rtol=1e-3, atol=1e-2)
@@ -53,7 +54,8 @@ def do_backward(layer, args, gradient, forward_only=False):
         output = layer(*args)
         
     output.backward(gradient)
-
+    zero_grad(*args)
+    
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
@@ -69,7 +71,7 @@ def do_backward(layer, args, gradient, forward_only=False):
     ))
 
 
-def benchmark(size, provider, forward_only=True):
+def benchmark(size, provider, forward_only=False):
     input = torch.rand((batch, size, channels), device='cuda', requires_grad=True, dtype=torch.half)
     input_float = input.detach().float()
     kernel = torch.rand((4, channels), device='cuda', requires_grad=True)

@@ -2,7 +2,7 @@ import torch
 from triton import cdiv
 
 
-BLOCK = 32
+BL = 32
 KERNEL_SIZE = 4
 
 
@@ -21,7 +21,7 @@ class CausalDwConv1d(torch.autograd.Function):
         assert grad_output.is_contiguous()
         batch, length, channels = grad_output.shape
         grad_input = torch.empty_like(grad_output)
-        grad_kernel = torch.empty((KERNEL_SIZE, batch, cdiv(length, BLOCK - 2 * KERNEL_SIZE), channels), 
+        grad_kernel = torch.empty((KERNEL_SIZE, batch, cdiv(length, BL - 2 * KERNEL_SIZE), channels), 
                                   dtype=kernel.dtype, device=kernel.device)
         
         torch.ops.extension_cpp.causal_dw_conv1d_bwd.default(input, kernel, grad_output, grad_input, grad_kernel)
