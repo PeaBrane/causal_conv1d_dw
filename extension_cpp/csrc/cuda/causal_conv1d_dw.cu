@@ -24,7 +24,7 @@ __device__ __inline__ float silu_jacob(float x) {
 }
 
 __global__ void causal_dw_conv1d_fwd_kernel(
-  __half* input, const float* kernel, __half* output, int length, int chs
+  const __half* input, const float* kernel, __half* output, int length, int chs
 ) {
   __shared__ __half2 s_input[BL][BLOCK / 2];
   __shared__ float s_kernel[KERNEL_SIZE][BLOCK];
@@ -42,7 +42,7 @@ __global__ void causal_dw_conv1d_fwd_kernel(
     int pos_id = start_pos_id + l;
     int offset = b_id * length * chs + pos_id * chs + ch_id;
     s_input[l][tid] = (pos_id >= 0 && pos_id < length && ch_id < chs) ?
-                      reinterpret_cast<__half2*>(input + offset)[0] :
+                      reinterpret_cast<const __half2*>(input + offset)[0] :
                       __float2half2_rn(0.0f);
   }
 
@@ -71,7 +71,7 @@ __global__ void causal_dw_conv1d_fwd_kernel(
 }
 
 at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& kernel) {
-  __half* input_ptr = reinterpret_cast<__half*>(input.data_ptr<at::Half>());
+  const __half* input_ptr = reinterpret_cast<__half*>(input.data_ptr<at::Half>());
   const float* kernel_ptr = kernel.data_ptr<float>();
   at::Tensor output = torch::empty(input.sizes(), input.options());
   __half* output_ptr = reinterpret_cast<__half*>(output.data_ptr<at::Half>());
@@ -88,7 +88,7 @@ at::Tensor causal_dw_conv1d_fwd_cuda(const at::Tensor& input, const at::Tensor& 
 }
 
 __global__ void causal_dw_conv1d_bwd_kernel(
-  __half* input, const float* kernel, __half* grad_output, 
+  const __half* input, const float* kernel, const __half* grad_output, 
   __half* grad_input, float* grad_kernel, 
   int length, int chs
 ) {
@@ -109,7 +109,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
     int pos_id = start_pos_id + l - KERNEL_SIZE;
     int offset = b_id * length * chs + pos_id * chs + ch_id;
     s_input[l][tid] = (pos_id >= 0 && pos_id < length && ch_id < chs) ?
-                      reinterpret_cast<__half2*>(input + offset)[0] :
+                      reinterpret_cast<const __half2*>(input + offset)[0] :
                       __float2half2_rn(0.0f);
   }
 
@@ -124,7 +124,7 @@ __global__ void causal_dw_conv1d_bwd_kernel(
   for (int l = 0; l < BL - KERNEL_SIZE - 1; ++l) {
     int pos_id = start_pos_id + l;
     int offset = b_id * length * chs + pos_id * chs + ch_id;
-    __half2 tmp = reinterpret_cast<__half2*>(grad_output + offset)[0];
+    __half2 tmp = reinterpret_cast<const __half2*>(grad_output + offset)[0];
     s_output[l][tid] = (pos_id < length && ch_id < chs) ? __low2float(tmp) : 0.0f;
     s_output[l][tid + hb] = (pos_id < length && ch_id < chs) ? __high2float(tmp) : 0.0f;
   }
@@ -175,8 +175,8 @@ void causal_dw_conv1d_bwd_cuda(
   at::Tensor& grad_input, at::Tensor& grad_kernel
 ) {
   // const float* input_ptr = input.data_ptr<float>();
-  __half* input_ptr = reinterpret_cast<__half*>(input.data_ptr<at::Half>());
-  __half* grad_output_ptr = reinterpret_cast<__half*>(grad_output.data_ptr<at::Half>());
+  const __half* input_ptr = reinterpret_cast<__half*>(input.data_ptr<at::Half>());
+  const __half* grad_output_ptr = reinterpret_cast<__half*>(grad_output.data_ptr<at::Half>());
   const float* kernel_ptr = kernel.data_ptr<float>();
   __half* grad_input_ptr = reinterpret_cast<__half*>(grad_input.data_ptr<at::Half>());
   float* grad_kernel_ptr = grad_kernel.data_ptr<float>();
